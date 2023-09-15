@@ -1,4 +1,4 @@
 # LIKO
-A LiDAR-Inertial-Kinematic Odometry (LIKO) for humanoid robot state estimation. 
+A LiDAR-Inertial-Kinematic Odometry (LIKO) for biped robot state estimation. 
 
-The code and dataset will be avaliable soon. 
+The code and dataset will be available soon. 
