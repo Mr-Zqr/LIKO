@@ -1,0 +1,40 @@
+common:
+    lid_topic:  "/velodyne_points"	# 激光雷达数据的ros topic
+    imu_topic:  "/imu/data"	# imu数据的ros topic
+    time_sync_en: false         # ONLY turn on when external time synchronization is really not possible （
+    time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
+                                  # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
+                                  # 激光雷达与imu数据的时间差，如果不知道设为多少，就设成0。
+
+preprocess:
+    lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,  # 雷达类型，“2”指velodyne雷达
+    scan_line: 32	# 雷达线数（16,32,128等）
+    scan_rate: 10                # only need to be set for velodyne, unit: Hz,  # 扫描频率，需要与velodyne雷达扫描频率相匹配
+    timestamp_unit: 2            # the unit of time/t field in the PointCloud2 rostopic: 0-second, 1-milisecond, 2-microsecond, 3-nanosecond. # 根据PoindCloud2 rostopic中的time（Velodyne）或t（Ouster）字段设置时间单位
+    blind: 2	# 最小距离阈值，即过滤掉0～blind范围内的点云
+
+mapping: # 建图相关设置
+    acc_cov: 0.1	  # 加速度协方差
+    gyr_cov: 0.1	  # 陀螺仪协防差
+    b_acc_cov: 0.0001	  # 加速度零偏协防差
+    b_gyr_cov: 0.0001	  # 陀螺仪零偏协防差
+    fov_degree:    180	  # 激光雷达视场角
+    det_range:     100.0  # 激光雷达的最大探测范围
+    extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic, # 是否开启在线外参估计
+    extrinsic_T: [ 0, 0, 0.1]	  # 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+    extrinsic_R: [ 1, 0, 0, 	  # 雷达相对于IMU的外参R
+                   0, 1, 0, 
+                   0, 0, 1]
+
+publish: # ROS 话题发布相关设置
+    path_en: true 		 # 是否发布“Path”话题
+    scan_publish_en:  true       # false: close all the point cloud output  # 如果选否：关闭所有点云输出
+    dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.  # 如果选否：降低点云中点的数量
+    scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame  # 如果选是：输出 IMU-body-frame 中的点云扫描
+
+pcd_save: # 点云存储设置
+    pcd_save_en: true	# 是否存储最终的点云地图
+    interval: -1                 # how many LiDAR frames saved in each pcd file; 
+                                 # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+                                 # 每个pcd文件中存储的雷达帧的数量
+                                 # “-1”指所有的帧都被存储在一个pcd文件中，当雷达帧过多时可能导致内存崩溃。
