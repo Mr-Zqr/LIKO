@@ -1,9 +1,9 @@
 common:
     lid_topic:  "/velodyne_points"
-    imu_topic:  "/bitbot/imu"
-    encoder_topic: "/bitbot/joint_state"
-    l_foot_force: "/bitbot/l_foot_force"
-    r_foot_force: "/bitbot/r_foot_force"
+    imu_topic:  "/bhr_b3/imu"
+    encoder_topic: "/bhr_b3/foot_state"
+    l_foot_force: "/bhr_b3/l_foot_force"
+    r_foot_force: "/bhr_b3/r_foot_force"
     time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
     time_offset_lidar_to_imu: 0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
     kinematic_cov: 0.00001 

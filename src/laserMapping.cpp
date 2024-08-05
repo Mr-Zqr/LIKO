@@ -32,7 +32,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
-#include <pinocchio/fwd.hpp>
+// #include <pinocchio/fwd.hpp>
 #include <omp.h>
 #include <mutex>
 #include <math.h>
@@ -65,15 +65,14 @@
 #include "preprocess.h"
 
 #include <ikd-Tree/ikd_Tree.h>
-#include <pinocchio/parsers/urdf.hpp>
-#include "pinocchio/algorithm/joint-configuration.hpp"
-#include "pinocchio/algorithm/model.hpp"
-#include "pinocchio/algorithm/kinematics.hpp"
-#include "pinocchio/algorithm/center-of-mass.hpp"
-#include "pinocchio/algorithm/frames.hpp"
+// #include <pinocchio/parsers/urdf.hpp>
+// #include "pinocchio/algorithm/joint-configuration.hpp"
+// #include "pinocchio/algorithm/model.hpp"
+// #include "pinocchio/algorithm/kinematics.hpp"
+// #include "pinocchio/algorithm/center-of-mass.hpp"
+// #include "pinocchio/algorithm/frames.hpp"
 #include <ros/callback_queue.h>
 
-#include "serow/serow_method.hpp"
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -156,17 +155,16 @@ nav_msgs::Path path;
 nav_msgs::Odometry odomAftMapped;
 geometry_msgs::Quaternion geoQuat;
 geometry_msgs::PoseStamped msg_body_pose;
-sensor_msgs::Imu bitbotSE;
-nav_msgs::Odometry VelocityMeas;
+nav_msgs::Odometry likoSE;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
 // pinocchio variabiles.
-pinocchio::Model model_;
-pinocchio::Data data_;
-Eigen::VectorXd q_;
-std::string urdf_file;
+// pinocchio::Model model_;
+// pinocchio::Data data_;
+// Eigen::VectorXd q_;
+// std::string urdf_file;
 Matrix3d R_base_imu;
 Vector3d t_base_imu;
 Vector3d t_imu_foot;
@@ -185,13 +183,12 @@ static Eigen::Vector3d position_residual(0,0,0);
 int num_predicted_imu_meas = 0;
 double kinematic_cov, kinematic_update_cov;
 
-
 static V3D foot_position_kinematic, body_position_kinematic;
 Matrix3d R_base_rfoot, R_base_lfoot, R_base_foot;
-Vector3d t_base_rfoot, t_base_lfoot;
+Vector3d t_base_rfoot, t_base_lfoot, foot_vel, t_imu_lfoot, t_imu_rfoot, lfoot_vel, rfoot_vel;
 Matrix<double, 3, 3> R_se;
-Matrix<double,3,10> J_fix_velocity;
-Matrix<double, 6, 16> J_rfoot, J_lfoot;
+// Matrix<double,3,10> J_fix_velocity;
+// Matrix<double, 6, 16> J_rfoot, J_lfoot;
 
 
 using namespace std; //DEBUG
@@ -208,7 +205,6 @@ static ContactPoint next_contact;
 static ContactPoint prev_contact;
 static int contact_change_num = 0;
 
-SerowMethod Serow_shimitt(false);
 std::string support_leg_prev;
 static ContactPoint contact_point_serow_shimitt = ContactPoint::NONE;
 Eigen::Vector3d LLegGRF, RLegGRF, LLegGRT, RLegGRT;
@@ -439,26 +435,17 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
 void encoder_cbk(const sensor_msgs::JointState::ConstPtr &msg)
 {
-    // mtx_buffer.lock();
     encoder_buffer.push_back(msg);
-    // mtx_buffer.unlock();
-    // sig_buffer.notify_all();
 }
 
 void l_foot_force_cbk(const geometry_msgs::WrenchStamped::ConstPtr &msg)
 {
-    // mtx_buffer.lock();
     l_foot_force_buffer.push_back(msg);
-    // mtx_buffer.unlock();
-    // sig_buffer.notify_all();
 }
 
 void r_foot_force_cbk(const geometry_msgs::WrenchStamped::ConstPtr &msg)
 {
-    // mtx_buffer.lock();
     r_foot_force_buffer.push_back(msg);
-    // mtx_buffer.unlock();
-    // sig_buffer.notify_all();
 }
 
 double lidar_mean_scantime = 0.0;
@@ -537,11 +524,11 @@ bool new_force_and_encoder(MeasureGroup &meas)
     if (!l_foot_force_buffer.empty() && !r_foot_force_buffer.empty() && !encoder_buffer.empty()) 
     {
         has_new_data = true;
-        // ROS_INFO("l_foot_force_buffer.size(): %d", int(l_foot_force_buffer.size()));
-        // ROS_INFO("r_foot_force_buffer.size(): %d", int(r_foot_force_buffer.size()));
         meas.l_f_force = l_foot_force_buffer.back();
         meas.r_f_force = r_foot_force_buffer.back();
-        meas.joint_encoder = encoder_buffer.back();
+        meas.foot_state= encoder_buffer.back();
+        // std::cout << "foot_state_size:" << encoder_buffer.size() << std::endl;
+        // std::cout << "foot_force_buffer_size:" << r_foot_force_buffer.size() << std::endl;
         LLegGRF << meas.l_f_force->wrench.force.x, meas.l_f_force->wrench.force.y, meas.l_f_force->wrench.force.z;
         RLegGRF << meas.r_f_force->wrench.force.x, meas.r_f_force->wrench.force.y, meas.r_f_force->wrench.force.z;
         LLegGRT << meas.l_f_force->wrench.torque.x, meas.l_f_force->wrench.torque.y, meas.l_f_force->wrench.torque.z;
@@ -760,25 +747,28 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
 }
 
-void publish_bitbot_se(const ros::Publisher & pubBitbotSE)
+void publish_liko_se(const ros::Publisher & pubLikoSE)
 {
-    bitbotSE.header.frame_id = "torso";
-    bitbotSE.header.stamp = ros::Time::now();
+    likoSE.header.frame_id = "torso";
+    likoSE.header.stamp = ros::Time::now();
 
-    bitbotSE.linear_acceleration.x = state_point.pos(0);
-    bitbotSE.linear_acceleration.y = state_point.pos(1);
-    bitbotSE.linear_acceleration.z = state_point.pos(2);
-    bitbotSE.angular_velocity.x = state_point.vel(0);
-    bitbotSE.angular_velocity.y = state_point.vel(1);
-    bitbotSE.angular_velocity.z = state_point.vel(2);
+    likoSE.pose.pose.position.x = state_point.pos(0);
+    likoSE.pose.pose.position.y = state_point.pos(1);    
+    likoSE.pose.pose.position.z = state_point.pos(2);
+    likoSE.pose.pose.orientation.x = geoQuat.x;
+    likoSE.pose.pose.orientation.y = geoQuat.y;
+    likoSE.pose.pose.orientation.z = geoQuat.z;
+    likoSE.pose.pose.orientation.w = geoQuat.x;    
 
-    // 使用eigen将q转为rpy之后付给bitbotSE
-    V3D rpy = Log(state_point.rot.toRotationMatrix());
-    bitbotSE.orientation.x = rpy(0);
-    bitbotSE.orientation.y = rpy(1);
-    bitbotSE.orientation.z = rpy(2);
+    likoSE.twist.twist.linear.x = state_point.vel(0);
+    likoSE.twist.twist.linear.y = state_point.vel(1);
+    likoSE.twist.twist.linear.z = state_point.vel(2);
+    likoSE.twist.twist.angular.x = Measures.imu.back()->angular_velocity.x;
+    likoSE.twist.twist.angular.y = Measures.imu.back()->angular_velocity.y;
+    likoSE.twist.twist.angular.z = Measures.imu.back()->angular_velocity.z;
+    // 使用eigen将q转为rpy之后付给LIKO
     
-    pubBitbotSE.publish(bitbotSE);
+    pubLikoSE.publish(likoSE);
 }
 void publish_path(const ros::Publisher pubPath)
 {
@@ -796,63 +786,25 @@ void publish_path(const ros::Publisher pubPath)
     }
 }
 
-void publish_velocity_measure(const ros::Publisher pubVelocityMeas, const Vector3d &v_meas, const Vector3d &p_meas)
-{
-    VelocityMeas.header.stamp = ros::Time().fromSec(Measures.imu.back()->header.stamp.toSec());
-    VelocityMeas.header.frame_id = "debug_data";
-    VelocityMeas.pose.pose.position.x = p_meas(0);
-    VelocityMeas.pose.pose.position.y = p_meas(1);
-    VelocityMeas.pose.pose.position.z = p_meas(2);
-    VelocityMeas.twist.twist.linear.x = v_meas(0);
-    VelocityMeas.twist.twist.linear.y = v_meas(1);
-    VelocityMeas.twist.twist.linear.z = v_meas(2);
-    pubVelocityMeas.publish(VelocityMeas);
-}
-
 void UpdateKinematicState(MeasureGroup &meas, esekfom::esekf<state_ikfom, 15, input_ikfom> &kf, ContactPoint &contact)
 {
     // 将meas.joint_encoder中的角度和角速度都存到eigen vector中
-    J_rfoot.setZero();
-    J_lfoot.setZero();
+    // J_rfoot.setZero();
+    // J_lfoot.setZero();
     R_se = state_point.rot.toRotationMatrix();
+    t_imu_lfoot(0) = meas.foot_state->position[0];
+    t_imu_lfoot(1) = meas.foot_state->position[1];
+    t_imu_lfoot(2) = meas.foot_state->position[2];
+    t_imu_rfoot(0) = meas.foot_state->position[3];
+    t_imu_rfoot(1) = meas.foot_state->position[4];
+    t_imu_rfoot(2) = meas.foot_state->position[5];
 
-    // 这个别扭的操作是在为自己脑残的操作买单，在控制段输出joint_state信息的时候把左右顺序搞反了，导致和urdf中的左右关节顺序不一致，现在只能这样。
-    joint_angle(0) = meas.joint_encoder->position[4];
-    joint_vel(0)   = meas.joint_encoder->velocity[4];
-    joint_angle(1) = meas.joint_encoder->position[5];
-    joint_vel(1)   = meas.joint_encoder->velocity[5];
-    joint_angle(2) = meas.joint_encoder->position[6];
-    joint_vel(2)   = meas.joint_encoder->velocity[6];
-    joint_angle(3) = meas.joint_encoder->position[7];
-    joint_vel(3)   = meas.joint_encoder->velocity[7];
-    joint_angle(4) = 0.0;
-    joint_vel(4)   = 0.0;
-    joint_angle(5) = meas.joint_encoder->position[0];
-    joint_vel(5)   = meas.joint_encoder->velocity[0];
-    joint_angle(6) = meas.joint_encoder->position[1];
-    joint_vel(6)   = meas.joint_encoder->velocity[1];
-    joint_angle(7) = meas.joint_encoder->position[2];
-    joint_vel(7)   = meas.joint_encoder->velocity[2];
-    joint_angle(8) = meas.joint_encoder->position[3];
-    joint_vel(8)   = meas.joint_encoder->velocity[3];
-    joint_angle(9) = 0.0;
-    joint_vel(9)   = 0.0;
-
-    joint_vel = 0.1047*joint_vel;
-
-    constexpr int float_q = 7;
-    q_.tail(17-float_q) = joint_angle;
-    pinocchio::forwardKinematics(model_, data_, q_);
-    pinocchio::framesForwardKinematics(model_, data_, q_);
-
-    R_base_rfoot = data_.oMf[Rfoot_id].rotation();
-    t_base_rfoot = data_.oMf[Rfoot_id].translation();
-    R_base_lfoot = data_.oMf[Lfoot_id].rotation();
-    t_base_lfoot = data_.oMf[Lfoot_id].translation();
-    
-    pinocchio::computeJointJacobians(model_, data_, q_);
-    pinocchio::getFrameJacobian(model_, data_, Rfoot_id, pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, J_rfoot);
-    pinocchio::getFrameJacobian(model_, data_, Lfoot_id, pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, J_lfoot);
+    lfoot_vel(0) = meas.foot_state->velocity[0];
+    lfoot_vel(1) = meas.foot_state->velocity[1];
+    lfoot_vel(2) = meas.foot_state->velocity[2];
+    rfoot_vel(0) = meas.foot_state->velocity[3];
+    rfoot_vel(1) = meas.foot_state->velocity[4];
+    rfoot_vel(2) = meas.foot_state->velocity[5];
 }
 void UpdateContactPositionAftSwitch(const ContactPoint & contact)
 {
@@ -899,13 +851,17 @@ Vector3d KinematicVelocityEstimation(const MeasureGroup &meas, const ContactPoin
 
     if(contact == ContactPoint::LeftFoot)
     {
-        t_imu_foot = t_base_lfoot-t_base_imu;
-        J_fix_velocity = J_lfoot.block<3,10>(0,6);
+        // t_imu_foot = t_base_lfoot-t_base_imu;
+        t_imu_foot = t_imu_lfoot;
+        // J_fix_velocity = J_lfoot.block<3,10>(0,6);
+        foot_vel = lfoot_vel;
     }
     else if(contact == ContactPoint::RightFoot)
     {
-        t_imu_foot = t_base_rfoot-t_base_imu;
-        J_fix_velocity = J_rfoot.block<3,10>(0,6);
+        // t_imu_foot = t_base_rfoot-t_base_imu;
+        // J_fix_velocity = J_rfoot.block<3,10>(0,6);
+        t_imu_foot = t_imu_rfoot;
+        foot_vel = rfoot_vel;
     }
     Vector3d v_base_meas;
     Vector3d w_base;    
@@ -922,9 +878,7 @@ Vector3d KinematicVelocityEstimation(const MeasureGroup &meas, const ContactPoin
         w_base <<  meas.imu.back()->angular_velocity.x, meas.imu.back()->angular_velocity.y, meas.imu.back()->angular_velocity.z;
     }
     
-    v_base_meas = w_base.cross(t_imu_foot)+J_fix_velocity*joint_vel;
-    // v_base_meas = w_base.cross(t_imu_foot);
-    // v_base_meas = J_fix_velocity*joint_vel;
+    v_base_meas = w_base.cross(t_imu_foot) + foot_vel;
     v_base_meas = -R_se*v_base_meas;
     return v_base_meas;
 }
@@ -1090,9 +1044,9 @@ int main(int argc, char** argv)
     nh.param<string>("map_file_path",map_file_path,"");
     nh.param<string>("common/lid_topic",lid_topic,"/livox/lidar");
     nh.param<string>("common/imu_topic", imu_topic,"/livox/imu");
-    nh.param<string>("common/encoder_topic", encoder_topic,"/bitbot/joint_state");
-    nh.param<string>("common/l_foot_force", l_foot_force_topic,"/bitbot/l_foot_force");
-    nh.param<string>("common/r_foot_force", r_foot_force_topic,"/bitbot/r_foot_force");
+    nh.param<string>("common/encoder_topic", encoder_topic,"/bhr_b3/foot_state");
+    nh.param<string>("common/l_foot_force", l_foot_force_topic,"/bhr_b3/l_foot_force");
+    nh.param<string>("common/r_foot_force", r_foot_force_topic,"/bhr_b3/r_foot_force");
     nh.param<bool>("common/time_sync_en", time_sync_en, false);
     nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
@@ -1124,24 +1078,24 @@ int main(int argc, char** argv)
     cout << "kineamtic_cov: " << kinematic_cov << endl;
 
     // init pinocchio
-    urdf_file = "/home/zqr/catkin_ws/src/bitbot_kinematics_se/src/kuafu.urdf";
-    pinocchio::urdf::buildModel(urdf_file, model_);
-    data_ = pinocchio::Data(model_);
-    q_ = pinocchio::neutral(model_);
-    pinocchio::forwardKinematics(model_, data_, q_);
-    pinocchio::framesForwardKinematics(model_, data_, q_);
-    // print ros info that indicates pinocchio init down.
-    cout << "Pinocchio init down, model: " << model_.name << "nq: " << model_.nq << endl;
+    // urdf_file = "/home/zqr/catkin_ws/src/bitbot_kinematics_se/src/kuafu.urdf";
+    // pinocchio::urdf::buildModel(urdf_file, model_);
+    // data_ = pinocchio::Data(model_);
+    // q_ = pinocchio::neutral(model_);
+    // pinocchio::forwardKinematics(model_, data_, q_);
+    // pinocchio::framesForwardKinematics(model_, data_, q_);
+    // // print ros info that indicates pinocchio init down.
+    // cout << "Pinocchio init down, model: " << model_.name << "nq: " << model_.nq << endl;
     // PinocchioInit();
     joint_angle.setZero();
     joint_vel.setZero();
-    Lfoot_id = model_.getFrameId("Lfoot");
-    Rfoot_id = model_.getFrameId("Rfoot");
-    IMU_id = model_.getFrameId("IMUlink");
-    R_base_imu = data_.oMf[IMU_id].rotation();
-    t_base_imu = data_.oMf[IMU_id].translation();
-    cout << "R_base_imu: " << R_base_imu << endl;
-    cout << "t_base_imu: " << t_base_imu.transpose() << endl;
+    // Lfoot_id = model_.getFrameId("Lfoot");
+    // Rfoot_id = model_.getFrameId("Rfoot");
+    // IMU_id = model_.getFrameId("IMUlink");
+    // R_base_imu = data_.oMf[IMU_id].rotation();
+    // t_base_imu = data_.oMf[IMU_id].translation();
+    // cout << "R_base_imu: " << R_base_imu << endl;
+    // cout << "t_base_imu: " << t_base_imu.transpose() << endl;
     
     path.header.stamp    = ros::Time::now();
     path.header.frame_id ="camera_init";
@@ -1184,12 +1138,6 @@ int main(int argc, char** argv)
     fill(epsi, epsi+23, 0.001);
     kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, epsi);
 
-    // init contact position state
-    state_ikfom state_init_pc = kf.get_x();
-    t_base_lfoot = data_.oMf[Lfoot_id].translation();
-    state_init_pc.pc = state_init_pc.rot.toRotationMatrix()*(t_base_lfoot - t_base_imu) + state_init_pc.pos;
-    kf.change_x(state_init_pc);
-
     /*** debug record ***/
     FILE *fp;
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
@@ -1224,7 +1172,7 @@ int main(int argc, char** argv)
             ("/Odometry", 200000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
-    ros::Publisher pubBitbotSE = nh.advertise<sensor_msgs::Imu>("/bitbot_se", 20);
+    ros::Publisher pubLikoSE = nh.advertise<nav_msgs::Odometry>("/liko", 20);
 
     // ros::Publisher pubVeocilityMeas = nh.advertise<nav_msgs::Odometry>("/velocity_meas", 20);
 //------------------------------------------------------------------------------------------------------
@@ -1342,7 +1290,7 @@ int main(int argc, char** argv)
 
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
-            publish_bitbot_se(pubBitbotSE);
+            publish_liko_se(pubLikoSE);
 
             /*** add the feature points to map kdtree ***/
             t3 = omp_get_wtime();
@@ -1396,83 +1344,60 @@ int main(int argc, char** argv)
             p_imu->PredictImuState(Measures, kf, num_predicted_imu_meas, R_base_foot);
             num_predicted_imu_meas = Measures.imu.size();
             state_point = kf.get_x();
-            // publish_bitbot_se(pubBitbotSE);
         }
 
         if(new_force_and_encoder(Measures) && !Measures.imu.empty())
         {
-            // if(Measures.l_f_force->wrench.force.z>150 && Measures.r_f_force->wrench.force.z>150)
-            // {
-            //     contact = ContactPoint::BothFeet;
-            // }
-            // else
-            // {
-            //     if(Measures.l_f_force->wrench.force.z > 250)
-            //     {
-            //         contact = ContactPoint::LeftFoot;
-            //     }
-            //     else if(Measures.r_f_force->wrench.force.z > 250)
-            //     {
-            //         contact = ContactPoint::RightFoot;
-            //     }
-            //     else
-            //     {
-            //         contact = ContactPoint::NONE;
-            //     }
-            // }
+            if(Measures.l_f_force->wrench.force.z>150 && Measures.r_f_force->wrench.force.z>150)
+            {
+                contact = ContactPoint::BothFeet;
+            }
+            else
+            {
+                if(Measures.l_f_force->wrench.force.z > 250)
+                {
+                    contact = ContactPoint::LeftFoot;
+                }
+                else if(Measures.r_f_force->wrench.force.z > 250)
+                {
+                    contact = ContactPoint::RightFoot;
+                }
+                else
+                {
+                    contact = ContactPoint::NONE;
+                }
+            }
             
-            // // shimiit trigger
-            // if(contact != prev_contact)
-            // {
-            //   if(contact_change_num == 0)
-            //   {
-            //     next_contact = contact;
-            //     contact_change_num++;
-            //   }
-            //   else
-            //   {
-            //     if(contact == next_contact)
-            //     {
-            //       contact_change_num++;
-            //     }
-            //     else
-            //     {
-            //       contact_change_num=0;
-            //     }
-            //   }
-            //   if(contact_change_num > 2)
-            //   {
-            //     prev_contact = contact;
-            //     UpdateKinematicState(Measures, kf, prev_contact);
-            //     UpdateContactPositionAftSwitch(prev_contact);
-            //   }
-            // }    
-            // else
-            // {
-            //     UpdateKinematicState(Measures, kf, prev_contact);
-            // }
-            Serow_shimitt.LLeg_FT(LLegGRF, LLegGRT); 
-            Serow_shimitt.RLeg_FT(RLegGRF, RLegGRT);
-            std::string support_leg = Serow_shimitt.computeKinTFs();
-            if(support_leg == "LLeg")
+            // shimiit trigger
+            if(contact != prev_contact)
             {
-                contact_point_serow_shimitt = ContactPoint::LeftFoot;
-            }
-            else if(support_leg == "RLeg")
+              if(contact_change_num == 0)
+              {
+                next_contact = contact;
+                contact_change_num++;
+              }
+              else
+              {
+                if(contact == next_contact)
+                {
+                  contact_change_num++;
+                }
+                else
+                {
+                  contact_change_num=0;
+                }
+              }
+              if(contact_change_num > 2)
+              {
+                prev_contact = contact;
+                UpdateKinematicState(Measures, kf, prev_contact);
+                UpdateContactPositionAftSwitch(prev_contact);
+              }
+            }    
+            else
             {
-                contact_point_serow_shimitt = ContactPoint::RightFoot;
+                UpdateKinematicState(Measures, kf, prev_contact);
             }
-            else if(support_leg == "NONE")
-            {
-                contact_point_serow_shimitt = ContactPoint::NONE;
-            }
-            if(support_leg != support_leg_prev)
-            {
-                support_leg_prev = support_leg;
-                UpdateContactPositionAftSwitch(contact_point_serow_shimitt);                
-                // UpdateKinematicState(Measures, kf, contact_point_serow_shimitt);
-            }
-            UpdateKinematicState(Measures, kf, contact_point_serow_shimitt);
 
             if(p_imu->imu_inited)
             {
@@ -1483,25 +1408,17 @@ int main(int argc, char** argv)
                 UpdateBodyPositionKine(prev_contact);
 
                 position_residual = body_position_kinematic - state_point.pos;
-                // if(fabs(velocity_residual.x()) > 1 || fabs(velocity_residual.y()) > 1 || fabs(velocity_residual.z()) > 1)
-                // {
-                //     // ROS_WARN("velocity_residual: %f, %f, %f", velocity_residual.x(), velocity_residual.y(), velocity_residual.z());
-                //     publish_bitbot_se(pubBitbotSE);
-                //     // ROS_INFO("jump");
-                //     continue;
-                // }
                 double solve_H_time = 0;
-                // publish_velocity_measure(pubVeocilityMeas, v_meas, state_point.pc);
                 if(v_meas!=Eigen::Vector3d::Zero())
                 {
                     lidar_update = false;
                     kf.update_iterated_dyn_share_modified(kinematic_update_cov, solve_H_time, 1);
-                    publish_bitbot_se(pubBitbotSE);
                     
-                    ROS_INFO("published");
+                    // ROS_INFO("published");
                 }   
             }
             
+            publish_liko_se(pubLikoSE);
         }
 
         status = ros::ok();

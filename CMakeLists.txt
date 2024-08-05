@@ -58,7 +58,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.8 REQUIRED)
-find_package(pinocchio REQUIRED)
+# find_package(pinocchio REQUIRED)
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 
@@ -74,6 +74,7 @@ add_message_files(
   Pose6D.msg
 )
 
+
 generate_messages(
  DEPENDENCIES
  geometry_msgs
@@ -86,7 +87,9 @@ catkin_package(
 )
 
 add_executable(liko_se src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
-target_link_libraries(liko_se ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${pinocchio_LIBRARIES})
-target_include_directories(liko_se PRIVATE ${PYTHON_INCLUDE_DIRS} ${pinocchio_INCLUDE_DIRS})
+target_link_libraries(liko_se ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} )
+target_include_directories(liko_se PRIVATE ${PYTHON_INCLUDE_DIRS} )
 
-target_compile_features(liko_se PUBLIC cxx_std_11)
+# DEBUG
+set(CMAKE_BUILD_TYPE"Debug")
+# target_compile_features(liko_se PUBLIC cxx_std_11)

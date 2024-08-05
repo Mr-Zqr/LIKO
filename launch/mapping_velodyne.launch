@@ -20,6 +20,5 @@
 	  <node pkg="tf" type="static_transform_publisher" name="imu_to_vicon" args="0.1 0.0 0.2 0 0 0 tf_imu2vicon vicon 1" />
     </group>
 
-    <!-- <node pkg="rosbag" type="play" name="player" args="/home/zqr/devel/dataset/2023-06-01-16-59-34-full-size.bag" /> -->
 
 </launch>
