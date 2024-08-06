@@ -160,20 +160,10 @@ nav_msgs::Odometry likoSE;
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
-// pinocchio variabiles.
-// pinocchio::Model model_;
-// pinocchio::Data data_;
-// Eigen::VectorXd q_;
-// std::string urdf_file;
 Matrix3d R_base_imu;
 Vector3d t_base_imu;
 Vector3d t_imu_foot;
 
-int Lfoot_id;
-int Rfoot_id;
-int IMU_id;
-
-VectorXd joint_angle(10), joint_vel(10);
 Vector3d v_meas;
 
 static bool lidar_update=false;
@@ -183,13 +173,10 @@ static Eigen::Vector3d position_residual(0,0,0);
 int num_predicted_imu_meas = 0;
 double kinematic_cov, kinematic_update_cov;
 
-static V3D foot_position_kinematic, body_position_kinematic;
+static V3D body_position_kinematic;
 Matrix3d R_base_rfoot, R_base_lfoot, R_base_foot;
-Vector3d t_base_rfoot, t_base_lfoot, foot_vel, t_imu_lfoot, t_imu_rfoot, lfoot_vel, rfoot_vel;
+Vector3d foot_vel, t_imu_lfoot, t_imu_rfoot, lfoot_vel, rfoot_vel;
 Matrix<double, 3, 3> R_se;
-// Matrix<double,3,10> J_fix_velocity;
-// Matrix<double, 6, 16> J_rfoot, J_lfoot;
-
 
 using namespace std; //DEBUG
 
@@ -204,10 +191,6 @@ enum ContactPoint
 static ContactPoint next_contact;
 static ContactPoint prev_contact;
 static int contact_change_num = 0;
-
-std::string support_leg_prev;
-static ContactPoint contact_point_serow_shimitt = ContactPoint::NONE;
-Eigen::Vector3d LLegGRF, RLegGRF, LLegGRT, RLegGRT;
 
 void SigHandle(int sig)
 {
@@ -242,7 +225,6 @@ void pointBodyToWorld_ikfom(PointType const * const pi, PointType * const po, st
     po->z = p_global(2);
     po->intensity = pi->intensity;
 }
-
 
 void pointBodyToWorld(PointType const * const pi, PointType * const po)
 {
@@ -527,12 +509,6 @@ bool new_force_and_encoder(MeasureGroup &meas)
         meas.l_f_force = l_foot_force_buffer.back();
         meas.r_f_force = r_foot_force_buffer.back();
         meas.foot_state= encoder_buffer.back();
-        // std::cout << "foot_state_size:" << encoder_buffer.size() << std::endl;
-        // std::cout << "foot_force_buffer_size:" << r_foot_force_buffer.size() << std::endl;
-        LLegGRF << meas.l_f_force->wrench.force.x, meas.l_f_force->wrench.force.y, meas.l_f_force->wrench.force.z;
-        RLegGRF << meas.r_f_force->wrench.force.x, meas.r_f_force->wrench.force.y, meas.r_f_force->wrench.force.z;
-        LLegGRT << meas.l_f_force->wrench.torque.x, meas.l_f_force->wrench.torque.y, meas.l_f_force->wrench.torque.z;
-        RLegGRT << meas.r_f_force->wrench.torque.x, meas.r_f_force->wrench.torque.y, meas.r_f_force->wrench.torque.z;
         l_foot_force_buffer.clear();
         r_foot_force_buffer.clear();
         encoder_buffer.clear();
@@ -766,7 +742,6 @@ void publish_liko_se(const ros::Publisher & pubLikoSE)
     likoSE.twist.twist.angular.x = Measures.imu.back()->angular_velocity.x;
     likoSE.twist.twist.angular.y = Measures.imu.back()->angular_velocity.y;
     likoSE.twist.twist.angular.z = Measures.imu.back()->angular_velocity.z;
-    // 使用eigen将q转为rpy之后付给LIKO
     
     pubLikoSE.publish(likoSE);
 }
@@ -788,9 +763,6 @@ void publish_path(const ros::Publisher pubPath)
 
 void UpdateKinematicState(MeasureGroup &meas, esekfom::esekf<state_ikfom, 15, input_ikfom> &kf, ContactPoint &contact)
 {
-    // 将meas.joint_encoder中的角度和角速度都存到eigen vector中
-    // J_rfoot.setZero();
-    // J_lfoot.setZero();
     R_se = state_point.rot.toRotationMatrix();
     t_imu_lfoot(0) = meas.foot_state->position[0];
     t_imu_lfoot(1) = meas.foot_state->position[1];
@@ -814,12 +786,12 @@ void UpdateContactPositionAftSwitch(const ContactPoint & contact)
     }
     if(contact == ContactPoint::LeftFoot)
     {
-        state_point.pc = state_point.rot.toRotationMatrix()*(t_base_lfoot-t_base_imu) + state_point.pos;
+        state_point.pc = state_point.rot.toRotationMatrix()*(t_imu_lfoot) + state_point.pos;
         kf.change_x(state_point);
     }
     else if(contact == ContactPoint::RightFoot)
     {
-        state_point.pc = state_point.rot.toRotationMatrix()*(t_base_rfoot-t_base_imu) + state_point.pos;
+        state_point.pc = state_point.rot.toRotationMatrix()*(t_imu_rfoot) + state_point.pos;
         kf.change_x(state_point);
     }
 }
@@ -832,12 +804,12 @@ void UpdateBodyPositionKine(const ContactPoint &contact)
     }
     if(contact == ContactPoint::LeftFoot)
     {
-        body_position_kinematic = state_point.pc - state_point.rot.toRotationMatrix()*(t_base_lfoot-t_base_imu);
+        body_position_kinematic = state_point.pc - state_point.rot.toRotationMatrix()*(t_imu_lfoot);
         R_base_foot = R_base_lfoot;
     }
     else if(contact == ContactPoint::RightFoot)
     {
-        body_position_kinematic = state_point.pc - state_point.rot.toRotationMatrix()*(t_base_rfoot-t_base_imu);
+        body_position_kinematic = state_point.pc - state_point.rot.toRotationMatrix()*(t_imu_rfoot);
         R_base_foot = R_base_rfoot;
     }
 }
@@ -851,15 +823,11 @@ Vector3d KinematicVelocityEstimation(const MeasureGroup &meas, const ContactPoin
 
     if(contact == ContactPoint::LeftFoot)
     {
-        // t_imu_foot = t_base_lfoot-t_base_imu;
         t_imu_foot = t_imu_lfoot;
-        // J_fix_velocity = J_lfoot.block<3,10>(0,6);
         foot_vel = lfoot_vel;
     }
     else if(contact == ContactPoint::RightFoot)
     {
-        // t_imu_foot = t_base_rfoot-t_base_imu;
-        // J_fix_velocity = J_rfoot.block<3,10>(0,6);
         t_imu_foot = t_imu_rfoot;
         foot_vel = rfoot_vel;
     }
@@ -1077,26 +1045,6 @@ int main(int argc, char** argv)
     cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
     cout << "kineamtic_cov: " << kinematic_cov << endl;
 
-    // init pinocchio
-    // urdf_file = "/home/zqr/catkin_ws/src/bitbot_kinematics_se/src/kuafu.urdf";
-    // pinocchio::urdf::buildModel(urdf_file, model_);
-    // data_ = pinocchio::Data(model_);
-    // q_ = pinocchio::neutral(model_);
-    // pinocchio::forwardKinematics(model_, data_, q_);
-    // pinocchio::framesForwardKinematics(model_, data_, q_);
-    // // print ros info that indicates pinocchio init down.
-    // cout << "Pinocchio init down, model: " << model_.name << "nq: " << model_.nq << endl;
-    // PinocchioInit();
-    joint_angle.setZero();
-    joint_vel.setZero();
-    // Lfoot_id = model_.getFrameId("Lfoot");
-    // Rfoot_id = model_.getFrameId("Rfoot");
-    // IMU_id = model_.getFrameId("IMUlink");
-    // R_base_imu = data_.oMf[IMU_id].rotation();
-    // t_base_imu = data_.oMf[IMU_id].translation();
-    // cout << "R_base_imu: " << R_base_imu << endl;
-    // cout << "t_base_imu: " << t_base_imu.transpose() << endl;
-    
     path.header.stamp    = ros::Time::now();
     path.header.frame_id ="camera_init";
     ContactPoint contact = ContactPoint::NONE;
@@ -1127,12 +1075,6 @@ int main(int argc, char** argv)
     p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
     p_imu->set_contact_cov(V3D(kinematic_cov, kinematic_cov, kinematic_cov));
     v_meas.setZero();
-
-    // 初始化GRF，GRT
-    LLegGRF.setZero();
-    LLegGRT.setZero();
-    RLegGRF.setZero();
-    RLegGRT.setZero();
 
     double epsi[23] = {0.001};
     fill(epsi, epsi+23, 0.001);
